@@ -121,6 +121,7 @@ def restaurant(request):
     #places = api.search_places_by_coordinate(keywords, "35.29149,136.79922", "100", "restaurant")
     fields = ['name', 'formatted_address', 'international_phone_number', 'website', 'rating', 'review', 'photos', 'opening_hours', 'price_level']
     i = 0
+    score = {}
     for place in places:
         img=[]
         j=0
@@ -181,23 +182,38 @@ def restaurant(request):
             distance_time = []
             distance = 0
             duration = 0
+        #距離とratingからスコア付け
+        score_temp = (rating - 1) / 4.0 + (float(15 * 60) - distance_time["rows"][0]['elements'][0]['duration']['value']) / float(15*60)
+        score.update({name : score_temp})
         
         #探索結果をfirestoreに格納
         if 'open_now' in opening_hours and opening_hours['open_now'] == True and rating > 3.5:
-            doc_ref = db.collection(u'restaurants').document(details['result']['name'])
+            doc_ref = db.collection(u'restaurants').document(u'restaurants_details')
             doc_ref.set({
-                u'website': website,
-                u'address': address,
-                u'phone_number': phone_number,
-                u'reviews' : reviews,
-                u'photos': img,
-                u'price_level': price_level,
-                u'distance': distance,
-                u'duration': duration,
-                u'place_id': place['place_id'],
-                u'rating' : rating          
-            })
+                name : {
+                    u'website': website,
+                    u'address': address,
+                    u'phone_number': phone_number,
+                    u'reviews' : reviews,
+                    u'photos': img,
+                    u'price_level': price_level,
+                    u'distance': distance,
+                    u'duration': duration,
+                    u'place_id': place['place_id'],
+                    u'rating' : rating   
+                }       
+            }, merge=True)
             i=i+1
         
-    
+    score = sorted(score.items(), key=lambda x:x[1], reverse=True)
+    doc_ref = db.collection(u'restaurants').document(u'restaurants_score')
+    restaurant_list=[]
+    score_list=[]
+    for i in range(len(score)):
+        restaurant_list.append(score[i][0])
+        score_list.append(score[i][1])
+    doc_ref.set({
+        u'restaurants_rank' : restaurant_list,
+        u'restaurants_score' : score_list
+    })
     print("{}restrants found".format(i))
