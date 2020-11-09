@@ -87,12 +87,13 @@ def restaurant(request):
 
     #前回のレストラン検索情報を削除
     docs = db.collection(u'restaurants').stream()
-    for doc in docs:
-        db.collection(u'restaurants').document(doc.id).delete()
+    db.collection(u'restaurants').document('restaurants_details').delete()
+    db.collection(u'restaurants').document('restaurants_score').delete()
     #googlemap_API設定
     api = GooglePlaces("AIzaSyBQ_HzKvpdKet-T7W5o45Ozsry4clhz-6w")
     #firestoreからuser情報の取得
     user_info_ref = db.collection(u'users').document(u'userA')
+    chain_restaurants_ref = db.collection(u'restaurants').document(u'chain_restaurants')
     try:
         user_info = user_info_ref.get().to_dict()
         position = "{}, {}".format(str(user_info["position"]["latitude"]),str(user_info["position"]["longtitude"]))  
@@ -103,6 +104,10 @@ def restaurant(request):
         position = []
         keywords = []
         price = 10000
+    try:
+        chain_restaurants = chain_restaurants_ref.get().to_dict()
+    except google.cloud.exceptions.NotFound:
+        chain_restaurants = {'chain_restaurants':'##########'}
     
     #ユーザ予算情報を5段階に変換
     if price >= 10000:
@@ -125,6 +130,7 @@ def restaurant(request):
     for place in places:
         img=[]
         j=0
+        chain_restaurants_flg = int(0)
         details = api.get_place_details(place['place_id'], fields)
         try:
             website = details['result']['website']
@@ -182,12 +188,15 @@ def restaurant(request):
             distance_time = []
             distance = 0
             duration = 0
-        #距離とratingからスコア付け
-        score_temp = (rating - 1) / 4.0 + (float(15 * 60) - distance_time["rows"][0]['elements'][0]['duration']['value']) / float(15*60)
-        score.update({name : score_temp})
-        
+        #chain店である場合は除外
+        for chain_name in chain_restaurants['chain_restaurants']:
+            if chain_name in name:
+                chain_restaurants_flg = int(1)
+                break
+
         #探索結果をfirestoreに格納
-        if 'open_now' in opening_hours and opening_hours['open_now'] == True and rating > 3.5:
+        if ('open_now' in opening_hours) and (opening_hours['open_now'] == True) and (rating > 3.5) and (chain_restaurants_flg != int(1)):
+
             doc_ref = db.collection(u'restaurants').document(u'restaurants_details')
             doc_ref.set({
                 name : {
@@ -203,17 +212,22 @@ def restaurant(request):
                     u'rating' : rating   
                 }       
             }, merge=True)
+            #距離とratingからスコア付け
+            score_temp = (rating - 1) / 4.0 + (float(15 * 60) - distance_time["rows"][0]['elements'][0]['duration']['value']) / float(15*60)
+            score.update({name : score_temp})
             i=i+1
-        
+                
     score = sorted(score.items(), key=lambda x:x[1], reverse=True)
     doc_ref = db.collection(u'restaurants').document(u'restaurants_score')
     restaurant_list=[]
     score_list=[]
-    for i in range(len(score)):
-        restaurant_list.append(score[i][0])
-        score_list.append(score[i][1])
+    for index in range(len(score)):
+        restaurant_list.append(score[index][0])
+        score_list.append(score[index][1])
     doc_ref.set({
         u'restaurants_rank' : restaurant_list,
         u'restaurants_score' : score_list
     })
     print("{}restrants found".format(i))
+    print(chain_restaurants)
+    print(type(chain_restaurants))
